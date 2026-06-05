@@ -3,8 +3,8 @@ import {
   parseWarpFriendsHtml,
   formatWeekLabel,
   getSundayOf,
-} from "@40k/shared";
-import type { WeekData, FactionStat } from "@40k/shared";
+} from "../../packages/shared/src/index";
+import type { WeekData } from "../../packages/shared/src/index";
 
 async function fetchUrl(url: string): Promise<string | null> {
   try {

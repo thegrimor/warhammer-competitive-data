@@ -1,7 +1,7 @@
 import type { Handler } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
-import { getRecentWeekMondays } from "@40k/shared";
-import type { WeekData, MetaResponse } from "@40k/shared";
+import { getRecentWeekMondays } from "../../packages/shared/src/index";
+import type { WeekData, MetaResponse } from "../../packages/shared/src/index";
 import { scrapeWeek } from "../../apps/api/src/scraper";
 import { TTLCache } from "../../apps/api/src/cache";
 
