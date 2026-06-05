@@ -4,6 +4,7 @@ import { getRecentWeekMondays } from "../../packages/shared/src/index";
 import type { WeekData, MetaResponse } from "../../packages/shared/src/index";
 import { scrapeWeek } from "../../apps/api/src/scraper";
 import { TTLCache } from "../../apps/api/src/cache";
+import { debugMatchupSources } from "../../apps/api/src/matchup-scraper";
 
 // In-memory cache works within warm Lambda invocations
 const memCache = new TTLCache<WeekData>(12 * 60 * 60 * 1000);
@@ -39,6 +40,15 @@ export const handler: Handler = async (event) => {
     return {
       statusCode: 200,
       body: JSON.stringify({ ok: true, ts: new Date().toISOString() }),
+    };
+  }
+
+  if (path.includes("/debug/matchups")) {
+    const results = await debugMatchupSources();
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify(results, null, 2),
     };
   }
 
