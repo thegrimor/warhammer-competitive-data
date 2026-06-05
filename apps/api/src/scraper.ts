@@ -49,7 +49,9 @@ export async function scrapeWeek(weekMonday: Date, delayMs = 300): Promise<WeekD
 
     const factions = parseWarpFriendsHtml(html);
     if (factions.length === 0) {
-      log.push(`${slug}→200 no table`);
+      // Include first 300 chars of content to diagnose parser issues
+      const snippet = html.replace(/\s+/g, " ").slice(0, 300);
+      log.push(`${slug}→200 no table | content: ${snippet}`);
       continue;
     }
 
