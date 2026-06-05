@@ -6,19 +6,26 @@ import {
 } from "../../../packages/shared/src/index";
 import type { WeekData } from "../../../packages/shared/src/index";
 
-async function fetchUrl(url: string): Promise<string | null> {
+// Returns [html, statusOrError]
+async function fetchUrl(url: string): Promise<[string | null, string]> {
   try {
     const res = await fetch(url, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (compatible; 40k-meta-analyzer/1.0; +https://github.com/thegrimor/warhammer-competitive-data)",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "max-age=0",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
       },
       signal: AbortSignal.timeout(10000),
     });
-    if (res.ok) return res.text();
-    return null;
-  } catch {
-    return null;
+    if (res.ok) return [await res.text(), `${res.status}`];
+    return [null, `HTTP ${res.status}`];
+  } catch (e) {
+    return [null, `ERR: ${String(e).slice(0, 80)}`];
   }
 }
 
@@ -36,12 +43,23 @@ export async function scrapeWeek(
 
   if (delayMs > 0) await delay(delayMs);
 
+  const log: string[] = [];
+
   for (const url of candidates) {
-    const html = await fetchUrl(url);
-    if (!html) continue;
+    const [html, status] = await fetchUrl(url);
+    // Extract last path segment for concise logging
+    const slug = url.split("/").filter(Boolean).pop() ?? url;
+
+    if (!html) {
+      log.push(`${slug}→${status}`);
+      continue;
+    }
 
     const factions = parseWarpFriendsHtml(html);
-    if (factions.length === 0) continue;
+    if (factions.length === 0) {
+      log.push(`${slug}→200 but no table`);
+      continue;
+    }
 
     return {
       meta: {
@@ -64,6 +82,6 @@ export async function scrapeWeek(
       fetchedAt: new Date().toISOString(),
     },
     factions: [],
-    error: `No data found after trying ${candidates.length} URL candidates`,
+    error: log.join(" | "),
   };
 }
