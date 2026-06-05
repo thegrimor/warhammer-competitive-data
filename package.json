@@ -6,7 +6,11 @@
     "build": "turbo build",
     "lint": "turbo lint"
   },
+  "dependencies": {
+    "@netlify/blobs": "^8.0.0"
+  },
   "devDependencies": {
+    "@netlify/functions": "^3.0.0",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
   },
