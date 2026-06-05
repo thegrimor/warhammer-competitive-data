@@ -91,6 +91,19 @@ export function getRecentWeekMondays(count: number, referenceDate?: Date): Date[
   return weeks;
 }
 
+/**
+ * Returns the 2 unique post slug candidates for a week (without post date prefix).
+ * Used to query the WordPress.com REST API by slug.
+ */
+export function generateSlugCandidates(weekMonday: Date): string[] {
+  const weekSunday = addDays(weekMonday, 6);
+  const pubMonday = addDays(weekSunday, 1);
+  return [0, 1].map((offset) => {
+    const slugDate = addDays(pubMonday, offset);
+    return `40k-meta-stats-from-${slugFromDate(slugDate)}`;
+  });
+}
+
 export function formatWeekLabel(monday: Date): string {
   const sunday = addDays(monday, 6);
   const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
