@@ -46,9 +46,100 @@ function parseWinRate(s: string): number {
   const cleaned = s.trim().replace("%", "");
   const n = parseFloat(cleaned);
   if (isNaN(n)) return 0;
-  // Normalize: if it looks like 0-1 range, convert to 0-100
   return n <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
 }
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#8211;/g, "–")
+    .replace(/&#8212;/g, "—")
+    .replace(/&#124;/g, "|")
+    .replace(/&[a-z0-9]+;/g, " ");
+}
+
+function stripTags(s: string): string {
+  return s.replace(/<[^>]+>/g, "").trim();
+}
+
+function cellText(tdHtml: string): string {
+  return decodeEntities(stripTags(tdHtml)).trim();
+}
+
+// ── Strategy 1: HTML <table> ──────────────────────────────────────────────────
+
+function parseFactionRows(
+  rows: string[],
+  columns: ColumnMap,
+  startIdx: number
+): FactionStat[] {
+  const factions: FactionStat[] = [];
+  let current: FactionStat | null = null;
+
+  for (let i = startIdx; i < rows.length; i++) {
+    const cells: string[] = [];
+    const re = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rows[i])) !== null) cells.push(cellText(m[1]));
+
+    if (cells.length === 0) continue;
+
+    const factionCell = cells[columns.faction] ?? "";
+    const isSub = factionCell === "" || factionCell.includes("*");
+
+    if (isSub) {
+      if (!current) continue;
+      const name = factionCell.replace(/\*/g, "").trim() || "Unknown";
+      current.subfactions.push({
+        name,
+        tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
+        x0: parseNumber(cells[columns.x0] ?? "0"),
+        x1: parseNumber(cells[columns.x1] ?? "0"),
+        winRate: parseWinRate(cells[columns.winRate] ?? "0"),
+      });
+    } else {
+      const f: FactionStat = {
+        faction: factionCell.replace(/\*/g, "").trim(),
+        tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
+        x0: parseNumber(cells[columns.x0] ?? "0"),
+        x1: parseNumber(cells[columns.x1] ?? "0"),
+        winRate: parseWinRate(cells[columns.winRate] ?? "0"),
+        subfactions: [],
+      };
+      if (!f.faction) continue;
+      factions.push(f);
+      current = f;
+    }
+  }
+  return factions;
+}
+
+function parseHtmlTable(html: string): FactionStat[] {
+  const tables = html.match(/<table[\s\S]*?<\/table>/gi) ?? [];
+
+  for (const table of tables) {
+    const rows = table.match(/<tr[\s\S]*?<\/tr>/gi) ?? [];
+    if (rows.length < 2) continue;
+
+    // Collect header cells from first row
+    const headerCells: string[] = [];
+    const re = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(rows[0])) !== null) headerCells.push(cellText(m[1]));
+
+    const columns = detectColumns(headerCells);
+    if (!columns) continue;
+
+    const factions = parseFactionRows(rows, columns, 1);
+    if (factions.length > 0) return factions;
+  }
+  return [];
+}
+
+// ── Strategy 2: pipe-delimited markdown text ──────────────────────────────────
 
 function splitTableRow(line: string): string[] {
   return line
@@ -58,12 +149,7 @@ function splitTableRow(line: string): string[] {
     .map((c) => c.trim());
 }
 
-function isSubfactionRow(rawLine: string, factionCell: string): boolean {
-  return factionCell === "" || rawLine.includes("*");
-}
-
 function extractRawText(html: string): string {
-  // Replace block-level tags with newlines to preserve line structure
   let text = html
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
@@ -71,32 +157,14 @@ function extractRawText(html: string): string {
     .replace(/<\/tr>/gi, "\n")
     .replace(/<\/li>/gi, "\n");
 
-  // Strip remaining tags
   text = text.replace(/<[^>]+>/g, "");
-
-  // Decode common HTML entities
-  text = text
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#8211;/g, "–")
-    .replace(/&#8212;/g, "—")
-    .replace(/&#124;/g, "|")
-    .replace(/&[a-z]+;/g, " ");
-
-  return text;
+  return decodeEntities(text);
 }
 
-/**
- * Parse WarpFriends HTML and extract faction stats.
- * The site embeds a pipe-delimited markdown table in the post content.
- */
-export function parseWarpFriendsHtml(html: string): FactionStat[] {
+function parsePipeTable(html: string): FactionStat[] {
   const text = extractRawText(html);
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
 
-  // Find the header row (contains "faction" and "|")
   let headerIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     const lower = lines[i].toLowerCase();
@@ -105,47 +173,43 @@ export function parseWarpFriendsHtml(html: string): FactionStat[] {
       break;
     }
   }
-
   if (headerIdx === -1) return [];
 
   const headerCells = splitTableRow(lines[headerIdx]);
   const columns = detectColumns(headerCells);
   if (!columns) return [];
 
-  // Skip separator row (--|---|-- etc.)
   let dataStart = headerIdx + 1;
-  if (dataStart < lines.length && lines[dataStart].includes("---")) {
-    dataStart++;
-  }
+  if (dataStart < lines.length && lines[dataStart].includes("---")) dataStart++;
 
   const factions: FactionStat[] = [];
-  let currentFaction: FactionStat | null = null;
+  let current: FactionStat | null = null;
 
   for (let i = dataStart; i < lines.length; i++) {
     const line = lines[i];
-    if (!line.includes("|")) break; // End of table
+    if (!line.includes("|")) break;
 
     const cells = splitTableRow(line);
     if (cells.length < Math.max(...Object.values(columns)) + 1) continue;
 
     const factionCell = cells[columns.faction] ?? "";
-    const isSub = isSubfactionRow(line, factionCell);
+    const isSub = factionCell === "" || line.includes("*");
 
     if (isSub) {
-      if (!currentFaction) continue;
-      const name = factionCell.replace(/\*/g, "").trim() ||
-                   cells[columns.faction + 1]?.replace(/\*/g, "").trim() ||
-                   "Unknown";
-      const sub: SubfactionStat = {
+      if (!current) continue;
+      const name =
+        factionCell.replace(/\*/g, "").trim() ||
+        cells[columns.faction + 1]?.replace(/\*/g, "").trim() ||
+        "Unknown";
+      current.subfactions.push({
         name,
         tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
         x0: parseNumber(cells[columns.x0] ?? "0"),
         x1: parseNumber(cells[columns.x1] ?? "0"),
         winRate: parseWinRate(cells[columns.winRate] ?? "0"),
-      };
-      currentFaction.subfactions.push(sub);
+      });
     } else {
-      const faction: FactionStat = {
+      const f: FactionStat = {
         faction: factionCell.replace(/\*/g, "").trim(),
         tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
         x0: parseNumber(cells[columns.x0] ?? "0"),
@@ -153,11 +217,23 @@ export function parseWarpFriendsHtml(html: string): FactionStat[] {
         winRate: parseWinRate(cells[columns.winRate] ?? "0"),
         subfactions: [],
       };
-      if (!faction.faction) continue;
-      factions.push(faction);
-      currentFaction = faction;
+      if (!f.faction) continue;
+      factions.push(f);
+      current = f;
     }
   }
-
   return factions;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Parse WarpFriends HTML and extract faction stats.
+ * Tries HTML <table> first (WordPress Gutenberg renders tables as HTML),
+ * falls back to pipe-delimited markdown text.
+ */
+export function parseWarpFriendsHtml(html: string): FactionStat[] {
+  const fromHtmlTable = parseHtmlTable(html);
+  if (fromHtmlTable.length > 0) return fromHtmlTable;
+  return parsePipeTable(html);
 }
