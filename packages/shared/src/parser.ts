@@ -2,9 +2,10 @@ import type { FactionStat, SubfactionStat } from "./types";
 
 interface ColumnMap {
   faction: number;
+  subfaction?: number;
   tw: number;
   x0: number;
-  x1: number;
+  x1?: number;
   winRate: number;
 }
 
@@ -12,16 +13,25 @@ function detectColumns(headerCells: string[]): ColumnMap | null {
   const map: Partial<ColumnMap> = {};
   headerCells.forEach((cell, i) => {
     const c = cell.toLowerCase().trim().replace(/\s+/g, "");
-    if (c.includes("faction") || c.includes("army") || c === "detachment") {
+    if (c === "subfaction" || c === "sub-faction") {
+      map.subfaction = i;
+    } else if (c.includes("faction") || c.includes("army") || c === "detachment") {
       map.faction = i;
     } else if (c === "tw" || c.includes("tournamentwin")) {
       map.tw = i;
-    } else if (c === "x-0" || c === "x0") {
-      map.x0 = i;
+    } else if ((c.includes("x-0") || c.includes("x0")) && !c.includes("%")) {
+      // "X-0/X-1" (combined) or standalone "X-0" — but not "X-0/X-1%"
+      if (c.includes("x-1") || c.includes("x1")) {
+        map.x0 = i; // combined col → store in x0, no separate x1
+      } else {
+        map.x0 = i;
+      }
     } else if (c === "x-1" || c === "x1") {
       map.x1 = i;
-    } else if (c.includes("win") || c.includes("wr") || c.includes("%")) {
+    } else if (c === "win%" || c === "wr%" || c === "winrate" || c === "wr") {
       map.winRate = i;
+    } else if ((c.includes("win") || c.includes("wr")) && !c.includes("tournament") && !c.includes("x-0") && !c.includes("x0")) {
+      map.winRate = map.winRate ?? i; // don't overwrite an already-set winRate
     }
   });
 
@@ -29,7 +39,6 @@ function detectColumns(headerCells: string[]): ColumnMap | null {
     map.faction === undefined ||
     map.tw === undefined ||
     map.x0 === undefined ||
-    map.x1 === undefined ||
     map.winRate === undefined
   ) {
     return null;
@@ -88,16 +97,22 @@ function parseFactionRows(
     if (cells.length === 0) continue;
 
     const factionCell = cells[columns.faction] ?? "";
-    const isSub = factionCell === "" || factionCell.includes("*");
+    // Subfaction rows have a trailing "*" on the faction cell
+    const isSub = factionCell.includes("*");
 
     if (isSub) {
       if (!current) continue;
-      const name = factionCell.replace(/\*/g, "").trim() || "Unknown";
+      // Subfaction name comes from dedicated subfaction column if available,
+      // otherwise strip "*" from the faction cell itself
+      const name =
+        (columns.subfaction !== undefined ? cells[columns.subfaction] : "") ||
+        factionCell.replace(/\*/g, "").trim() ||
+        "Unknown";
       current.subfactions.push({
-        name,
+        name: name.replace(/\*/g, "").trim(),
         tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
         x0: parseNumber(cells[columns.x0] ?? "0"),
-        x1: parseNumber(cells[columns.x1] ?? "0"),
+        x1: columns.x1 !== undefined ? parseNumber(cells[columns.x1] ?? "0") : 0,
         winRate: parseWinRate(cells[columns.winRate] ?? "0"),
       });
     } else {
@@ -105,7 +120,7 @@ function parseFactionRows(
         faction: factionCell.replace(/\*/g, "").trim(),
         tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
         x0: parseNumber(cells[columns.x0] ?? "0"),
-        x1: parseNumber(cells[columns.x1] ?? "0"),
+        x1: columns.x1 !== undefined ? parseNumber(cells[columns.x1] ?? "0") : 0,
         winRate: parseWinRate(cells[columns.winRate] ?? "0"),
         subfactions: [],
       };
@@ -190,22 +205,21 @@ function parsePipeTable(html: string): FactionStat[] {
     if (!line.includes("|")) break;
 
     const cells = splitTableRow(line);
-    if (cells.length < Math.max(...Object.values(columns)) + 1) continue;
 
     const factionCell = cells[columns.faction] ?? "";
-    const isSub = factionCell === "" || line.includes("*");
+    const isSub = factionCell.includes("*");
 
     if (isSub) {
       if (!current) continue;
       const name =
+        (columns.subfaction !== undefined ? cells[columns.subfaction] : "") ||
         factionCell.replace(/\*/g, "").trim() ||
-        cells[columns.faction + 1]?.replace(/\*/g, "").trim() ||
         "Unknown";
       current.subfactions.push({
-        name,
+        name: name.replace(/\*/g, "").trim(),
         tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
         x0: parseNumber(cells[columns.x0] ?? "0"),
-        x1: parseNumber(cells[columns.x1] ?? "0"),
+        x1: columns.x1 !== undefined ? parseNumber(cells[columns.x1] ?? "0") : 0,
         winRate: parseWinRate(cells[columns.winRate] ?? "0"),
       });
     } else {
@@ -213,7 +227,7 @@ function parsePipeTable(html: string): FactionStat[] {
         faction: factionCell.replace(/\*/g, "").trim(),
         tournamentWins: parseNumber(cells[columns.tw] ?? "0"),
         x0: parseNumber(cells[columns.x0] ?? "0"),
-        x1: parseNumber(cells[columns.x1] ?? "0"),
+        x1: columns.x1 !== undefined ? parseNumber(cells[columns.x1] ?? "0") : 0,
         winRate: parseWinRate(cells[columns.winRate] ?? "0"),
         subfactions: [],
       };
