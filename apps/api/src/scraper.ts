@@ -3,8 +3,8 @@ import {
   parseWarpFriendsHtml,
   formatWeekLabel,
   getSundayOf,
-} from "../../packages/shared/src/index";
-import type { WeekData } from "../../packages/shared/src/index";
+} from "../../../packages/shared/src/index";
+import type { WeekData } from "../../../packages/shared/src/index";
 
 async function fetchUrl(url: string): Promise<string | null> {
   try {
